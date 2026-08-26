@@ -1,8 +1,12 @@
 const params = new URLSearchParams(window.location.search);
-const configuredBase = window.WILL_API_BASE_URL || params.get('api') || '';
+
+function getBaseUrl() {
+  const configured = window.WILL_API_BASE_URL || localStorage.getItem('willApiBase') || params.get('api') || '';
+  return configured.replace(/\/$/, '');
+}
 
 export const WILL_API = {
-  baseUrl: configuredBase.replace(/\/$/, ''),
+  get baseUrl() { return getBaseUrl(); },
   healthPath: '/health',
   marketPath: '/api/market',
   analyzePath: '/api/analyze'
