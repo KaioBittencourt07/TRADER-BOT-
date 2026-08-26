@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import express from 'express';
+import analyzeRouter from './routes/analyze.js';
 
 const app = express();
 const port = Number(process.env.PORT || 3000);
@@ -13,6 +14,8 @@ app.get('/health', (_req, res) => {
     openaiConfigured: Boolean(process.env.OPENAI_API_KEY)
   });
 });
+
+app.use('/api', analyzeRouter);
 
 app.listen(port, () => {
   console.log(`WILL TRADER backend running on port ${port}`);
