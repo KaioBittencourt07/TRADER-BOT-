@@ -39,21 +39,36 @@ export function createTwelveDataProvider({ apiKey = process.env.TWELVEDATA_API_K
       const symbol = encodeURIComponent(asset);
       const interval = encodeURIComponent(timeframe);
       const headers = { Authorization: `apikey ${apiKey}` };
-      const [quoteResponse, seriesResponse] = await Promise.all([
-        fetchImpl(`${baseUrl}/quote?symbol=${symbol}`, { headers, cache: 'no-store' }),
+
+      // Use exchange_rate for the live FX price and provider timestamp.
+      // Keep time_series for historical candles and technical analysis.
+      const [rateResponse, seriesResponse] = await Promise.all([
+        fetchImpl(`${baseUrl}/exchange_rate?symbol=${symbol}&timezone=UTC`, { headers, cache: 'no-store' }),
         fetchImpl(`${baseUrl}/time_series?symbol=${symbol}&interval=${interval}&outputsize=${outputsize}&timezone=UTC`, { headers, cache: 'no-store' })
       ]);
-      if (!quoteResponse.ok) throw new Error(`Twelve Data quote HTTP ${quoteResponse.status}`);
+
+      if (!rateResponse.ok) throw new Error(`Twelve Data exchange_rate HTTP ${rateResponse.status}`);
       if (!seriesResponse.ok) throw new Error(`Twelve Data time_series HTTP ${seriesResponse.status}`);
-      const quote = await quoteResponse.json();
+
+      const rate = await rateResponse.json();
       const series = await seriesResponse.json();
-      if (quote.status === 'error') throw new Error(`Twelve Data quote: ${quote.message || 'erro'}`);
+      if (rate.status === 'error') throw new Error(`Twelve Data exchange_rate: ${rate.message || 'erro'}`);
       if (series.status === 'error') throw new Error(`Twelve Data time_series: ${series.message || 'erro'}`);
-      const price = num(quote.close ?? quote.price);
-      const timestamp = quote.timestamp ? new Date(Number(quote.timestamp) * 1000).toISOString() : null;
+
+      const price = num(rate.rate);
+      const timestamp = rate.timestamp ? new Date(Number(rate.timestamp) * 1000).toISOString() : null;
       if (!price || !timestamp || !Array.isArray(series.values)) throw new Error('Twelve Data retornou snapshot incompleto.');
+
       const technical = deriveTechnical(series.values);
-      const raw = { asset, timeframe, price, timestamp, candles: series.values, source: 'twelvedata', ...technical };
+      const raw = {
+        asset,
+        timeframe,
+        price,
+        timestamp,
+        candles: series.values,
+        source: 'twelvedata',
+        ...technical
+      };
       return normalizeMarketSnapshot(raw, { maxAgeMs });
     }
   };
