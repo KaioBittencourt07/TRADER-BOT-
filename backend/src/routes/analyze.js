@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { analyzeWithOpenAI } from '../ai/openaiEngine.js';
 import { normalizeMarketSnapshot } from '../../../data/src/marketAdapter.js';
+import { runWillPipeline } from '../../../engine/src/pipeline.js';
+import { createAuditEntry } from '../../../engine/src/auditLog.js';
 
 const router = Router();
 
@@ -14,49 +16,43 @@ router.post('/analyze', async (req, res) => {
     const rawMarket = payload.market ?? payload;
     const normalized = normalizeMarketSnapshot(rawMarket);
     if (!normalized.valid) {
-      return res.json({
-        ok: true,
-        source: 'data-guard',
-        decision: {
-          direction: 'WAIT',
-          score: 0,
-          confidence: 0,
-          thesis: 'Entrada bloqueada: dados de mercado inválidos ou atrasados.',
-          confirmations: [],
-          risks: [normalized.reason],
-          block: true
-        },
-        data: normalized
-      });
+      const decision = { direction: 'WAIT', score: 0, confidence: 0, blocked: true, reason: `Data Guard: ${normalized.reason}`, blockReasons: [normalized.reason] };
+      return res.json({ ok: true, source: 'data-guard', decision, data: normalized, audit: createAuditEntry({ signal: rawMarket, decision, context: payload.context }) });
     }
 
-    const marketAnalysis = { ...payload, market: normalized };
+    const context = payload.context ?? {};
+    const deterministic = runWillPipeline(normalized, context);
 
-    // Deterministic blocks always win over model output.
-    if (marketAnalysis.blocked === true || marketAnalysis.direction === 'WAIT') {
-      return res.json({
-        ok: true,
-        source: 'deterministic-gate',
-        decision: {
-          direction: 'WAIT',
-          score: marketAnalysis.score ?? 0,
-          confidence: marketAnalysis.confidence ?? 0,
-          thesis: 'Entrada bloqueada pelas regras determinísticas do WILL.',
-          confirmations: marketAnalysis.confirmations ?? [],
-          risks: marketAnalysis.riskFlags ?? ['Condição não liberada'],
-          block: true
-        },
-        data: normalized
-      });
+    if (!deterministic.executable) {
+      const decision = { ...deterministic, direction: 'WAIT', clickTime: null };
+      return res.json({ ok: true, source: 'will-deterministic', decision, data: normalized, audit: createAuditEntry({ signal: normalized, decision, context }) });
     }
 
-    const ai = await analyzeWithOpenAI(marketAnalysis);
-    const finalDecision = ai.block ? { ...ai, direction: 'WAIT' } : ai;
+    const ai = await analyzeWithOpenAI({ market: normalized, context, deterministic });
+    const consensus = !ai.block && ai.direction === deterministic.direction && ai.confidence >= (context.minimumAiConfidence ?? 70);
+    const decision = consensus
+      ? {
+          ...deterministic,
+          direction: deterministic.direction,
+          confidence: Math.round((deterministic.confidence + ai.confidence) / 2),
+          reason: `Consenso WILL + AI: ${ai.thesis}`,
+          ai: { direction: ai.direction, confidence: ai.confidence, score: ai.score, risks: ai.risks }
+        }
+      : {
+          ...deterministic,
+          direction: 'WAIT',
+          executable: false,
+          clickTime: null,
+          blocked: true,
+          reason: 'Consenso não confirmado entre WILL determinístico e AI.',
+          blockReasons: [...(deterministic.blockReasons ?? []), 'AI_CONSENSUS_FAILED']
+        };
 
-    return res.json({ ok: true, source: 'openai', decision: finalDecision, data: normalized });
+    if (decision.direction === 'BUY' || decision.direction === 'SELL') decision.clickTime = new Date().toISOString();
+    return res.json({ ok: true, source: consensus ? 'will-ai-consensus' : 'will-ai-veto', decision, data: normalized, audit: createAuditEntry({ signal: normalized, decision, context }) });
   } catch (error) {
-    console.error('AI analysis error:', error.message);
-    return res.status(500).json({ ok: false, error: 'Falha na análise de IA.' });
+    console.error('Analysis error:', error.message);
+    return res.status(500).json({ ok: false, error: 'Falha na análise.' });
   }
 });
 
