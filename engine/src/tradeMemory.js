@@ -1,4 +1,6 @@
-export function createTradeRecord({ signalId = crypto.randomUUID(), asset, direction, entryPrice, entryTime, expirySeconds = 60, result = 'PENDING', exitPrice = null, exitTime = null, source = 'paper' } = {}) {
+import { randomUUID } from 'node:crypto';
+
+export function createTradeRecord({ signalId = randomUUID(), asset, direction, entryPrice, entryTime, expirySeconds = 60, result = 'PENDING', exitPrice = null, exitTime = null, source = 'paper' } = {}) {
   return { signalId, asset, direction, entryPrice: Number(entryPrice), entryTime, expirySeconds, result, exitPrice, exitTime, source };
 }
 
