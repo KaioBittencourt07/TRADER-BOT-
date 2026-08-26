@@ -19,7 +19,7 @@ services:
       - key: DASHBOARD_ORIGIN
         sync: false
       - key: MARKET_MAX_AGE_MS
-        value: 30000
+        value: 10000
       - key: EXECUTION_DELAY_MS
         value: 0
       - key: EXECUTION_WINDOW_BEFORE_MS
