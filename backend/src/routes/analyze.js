@@ -7,6 +7,10 @@ import { resolveConsensus } from '../consensus.js';
 
 const router = Router();
 
+function aiFallbackEnabled() {
+  return process.env.ALLOW_DETERMINISTIC_FALLBACK !== 'false';
+}
+
 router.post('/analyze', async (req, res) => {
   try {
     const payload = req.body;
@@ -25,9 +29,15 @@ router.post('/analyze', async (req, res) => {
       return res.json({ ok: true, source: 'will-deterministic', decision, data: normalized, audit: createAuditEntry({ signal: normalized, decision, context }) });
     }
 
-    const ai = await analyzeWithOpenAI({ market: normalized, context, deterministic });
-    const result = resolveConsensus(deterministic, ai, { minimumAiConfidence: context.minimumAiConfidence ?? 70 });
-    return res.json({ ok: true, source: result.approved ? 'will-ai-consensus' : 'will-ai-veto', decision: result.decision, data: normalized, audit: createAuditEntry({ signal: normalized, decision: result.decision, context }) });
+    try {
+      const ai = await analyzeWithOpenAI({ market: normalized, context, deterministic });
+      const result = resolveConsensus(deterministic, ai, { minimumAiConfidence: context.minimumAiConfidence ?? 70 });
+      return res.json({ ok: true, source: result.approved ? 'will-ai-consensus' : 'will-ai-veto', decision: result.decision, data: normalized, audit: createAuditEntry({ signal: normalized, decision: result.decision, context }) });
+    } catch (aiError) {
+      if (!aiFallbackEnabled()) throw aiError;
+      const fallbackDecision = { ...deterministic, ai: { available: false }, reason: `${deterministic.reason || 'WILL determinístico'} | IA indisponível; fallback determinístico ativo.` };
+      return res.json({ ok: true, source: 'will-deterministic-fallback', decision: fallbackDecision, data: normalized, audit: createAuditEntry({ signal: normalized, decision: fallbackDecision, context }) });
+    }
   } catch (error) {
     console.error('Analysis error:', error.message);
     return res.status(500).json({ ok: false, error: 'Falha na análise.' });
