@@ -1,5 +1,8 @@
+const params = new URLSearchParams(window.location.search);
+const configuredBase = window.WILL_API_BASE_URL || params.get('api') || '';
+
 export const WILL_API = {
-  baseUrl: window.WILL_API_BASE_URL || '',
+  baseUrl: configuredBase.replace(/\/$/, ''),
   healthPath: '/health',
   analyzePath: '/api/analyze'
 };
