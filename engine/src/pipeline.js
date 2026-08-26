@@ -1,28 +1,17 @@
-import { classifyRegime } from './marketRegime.js';
-import { classifySetup } from './setupClassifier.js';
-import { decide } from './willEngine.js';
+import { willCore } from './willCore.js';
 
-export function analyzeMarket(data) {
-  const regimeResult = classifyRegime(data);
-  const setupResult = classifySetup(data, regimeResult.regime);
-  const decision = decide(data);
+export function analyzeMarket(data, context = {}) {
+  return willCore(data, context);
+}
 
-  const blockedByClassification =
-    regimeResult.regime === 'UNKNOWN' ||
-    setupResult.setup === 'UNKNOWN';
-
+export function runWillPipeline(data, context = {}) {
+  if (!data) throw new Error('Market snapshot ausente.');
+  const result = willCore(data, context);
+  const executable = result.direction !== 'WAIT' && !result.blocked;
   return {
-    ...decision,
-    regime: regimeResult.regime,
-    regimeConfidence: regimeResult.confidence,
-    regimeReason: regimeResult.reason,
-    setup: setupResult.setup,
-    setupConfidence: setupResult.confidence,
-    setupReason: setupResult.reason,
-    blocked: decision.blocked || blockedByClassification,
-    direction: decision.blocked || blockedByClassification ? 'WAIT' : decision.direction,
-    reason: blockedByClassification
-      ? 'Classificação de regime/setup insuficiente; entrada bloqueada.'
-      : decision.reason
+    ...result,
+    executable,
+    clickTime: executable ? new Date().toISOString() : null,
+    generatedAt: new Date().toISOString()
   };
 }
