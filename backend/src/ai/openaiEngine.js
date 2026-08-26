@@ -3,9 +3,7 @@ import OpenAI from 'openai';
 let client;
 
 function getClient() {
-  if (!process.env.OPENAI_API_KEY) {
-    throw new Error('OPENAI_API_KEY não configurada no backend.');
-  }
+  if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY não configurada no backend.');
   client ??= new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
   return client;
 }
@@ -14,12 +12,13 @@ const SYSTEM_INSTRUCTIONS = `Você é o WILL AI ENGINE. Analise somente os dados
 Nunca invente preço, candle, notícia, horário, payout ou resultado.
 WAIT é uma decisão válida.
 Não transforme baixa evidência em alta confiança.
-Respeite os bloqueios determinísticos do sistema.
-Sua função é contextualizar a análise; não ignorar o Risk Engine.`;
+O resultado determinístico do WILL é a autoridade de risco e direção-base.
+Você só pode confirmar ou vetar a direção determinística; nunca substituí-la.
+Se houver qualquer dúvida, conflito ou dado insuficiente, use block=true.`;
 
 export async function analyzeWithOpenAI(marketAnalysis) {
   const response = await getClient().responses.create({
-    model: process.env.OPENAI_MODEL || 'gpt-5.6',
+    model: process.env.OPENAI_MODEL || 'gpt-5.6-luna',
     instructions: SYSTEM_INSTRUCTIONS,
     input: JSON.stringify(marketAnalysis),
     text: {
@@ -44,6 +43,5 @@ export async function analyzeWithOpenAI(marketAnalysis) {
       }
     }
   });
-
   return JSON.parse(response.output_text);
 }
