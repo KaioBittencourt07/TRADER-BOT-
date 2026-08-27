@@ -1,4 +1,5 @@
 import { normalizeMarketSnapshot } from '../marketAdapter.js';
+import { createTwelveDataStream } from './twelveDataStream.js';
 
 const BASE_URL = 'https://api.twelvedata.com';
 
@@ -32,7 +33,13 @@ function deriveTechnical(values) {
   return { trend, momentum, structure, volatility, confirmations, candleCount: closes.length };
 }
 
-export function createTwelveDataProvider({ apiKey = process.env.TWELVEDATA_API_KEY, fetchImpl = fetch, maxAgeMs = Number(process.env.MARKET_MAX_AGE_MS || 30_000), baseUrl = BASE_URL } = {}) {
+export function createTwelveDataProvider({
+  apiKey = process.env.TWELVEDATA_API_KEY,
+  fetchImpl = fetch,
+  maxAgeMs = Number(process.env.MARKET_MAX_AGE_MS || 10_000),
+  baseUrl = BASE_URL,
+  stream = createTwelveDataStream({ apiKey, timeoutMs: Math.min(maxAgeMs, 8000) })
+} = {}) {
   if (!apiKey) throw new Error('TWELVEDATA_API_KEY não configurada.');
   return {
     async getSnapshot(asset, timeframe = '1min', outputsize = 50) {
@@ -40,33 +47,26 @@ export function createTwelveDataProvider({ apiKey = process.env.TWELVEDATA_API_K
       const interval = encodeURIComponent(timeframe);
       const headers = { Authorization: `apikey ${apiKey}` };
 
-      // Use exchange_rate for the live FX price and provider timestamp.
-      // Keep time_series for historical candles and technical analysis.
-      const [rateResponse, seriesResponse] = await Promise.all([
-        fetchImpl(`${baseUrl}/exchange_rate?symbol=${symbol}&timezone=UTC`, { headers, cache: 'no-store' }),
+      // REST supplies candle context; the live decision price/timestamp comes
+      // from Twelve Data's WebSocket so freshness is based on a real provider tick.
+      const [tick, seriesResponse] = await Promise.all([
+        stream.getLatest(asset),
         fetchImpl(`${baseUrl}/time_series?symbol=${symbol}&interval=${interval}&outputsize=${outputsize}&timezone=UTC`, { headers, cache: 'no-store' })
       ]);
 
-      if (!rateResponse.ok) throw new Error(`Twelve Data exchange_rate HTTP ${rateResponse.status}`);
       if (!seriesResponse.ok) throw new Error(`Twelve Data time_series HTTP ${seriesResponse.status}`);
-
-      const rate = await rateResponse.json();
       const series = await seriesResponse.json();
-      if (rate.status === 'error') throw new Error(`Twelve Data exchange_rate: ${rate.message || 'erro'}`);
       if (series.status === 'error') throw new Error(`Twelve Data time_series: ${series.message || 'erro'}`);
-
-      const price = num(rate.rate);
-      const timestamp = rate.timestamp ? new Date(Number(rate.timestamp) * 1000).toISOString() : null;
-      if (!price || !timestamp || !Array.isArray(series.values)) throw new Error('Twelve Data retornou snapshot incompleto.');
+      if (!Array.isArray(series.values)) throw new Error('Twelve Data retornou candles incompletos.');
 
       const technical = deriveTechnical(series.values);
       const raw = {
         asset,
         timeframe,
-        price,
-        timestamp,
+        price: tick.price,
+        timestamp: tick.timestamp,
         candles: series.values,
-        source: 'twelvedata',
+        source: 'twelvedata-websocket+rest',
         ...technical
       };
       return normalizeMarketSnapshot(raw, { maxAgeMs });
